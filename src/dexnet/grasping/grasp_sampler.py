@@ -201,6 +201,8 @@ class GraspSampler:
             new_grasps = self.sample_grasps(graspable, num_grasps_generate, vis, **kwargs)
 
             # COVERAGE REJECTION: prune grasps by distance
+            #防止过多极为相似的grasp，降低相互之间的覆盖率
+            #根据夹爪姿态之间的距离来进行拒绝
             pruned_grasps = []
             for grasp in new_grasps:
                 min_dist = np.inf
@@ -240,12 +242,108 @@ class GraspSampler:
 
         # shuffle computed grasps
         random.shuffle(grasps)
+        #如果检测出的抓取比要求的数量多
         if len(grasps) > target_num_grasps:
             logger.info('Truncating %d grasps to %d.',
                         len(grasps), target_num_grasps)
+            #截断至要求的数量就好
             grasps = grasps[:target_num_grasps]
         logger.info('Found %d grasps.', len(grasps))
         return grasps
+
+    def generate_grasps_score(self, graspable, target_num_grasps=None, grasp_gen_mult=5, max_iter=3,
+                        sample_approach_angles=False, vis=False, **kwargs):
+        """Samples a set of grasps for an object.
+        为某个物体采样系列抓取，并返回对应的分数
+
+        Parameters
+        ----------
+        graspable : :obj:`GraspableObject3D`
+            the object to grasp
+        target_num_grasps : int
+            number of grasps to return, defualts to self.target_num_grasps
+        grasp_gen_mult : int
+            number of additional grasps to generate
+        max_iter : int
+            number of attempts to return an exact number of grasps before giving up
+        sample_approach_angles : bool
+            whether or not to sample approach angles
+        vis : bool
+            whether show the grasp on picture
+
+        Return
+        ------
+        :obj:`list` of :obj:`ParallelJawPtGrasp3D`
+            list of generated grasps
+        """
+        # get num grasps
+        if target_num_grasps is None:
+            target_num_grasps = self.target_num_grasps
+        num_grasps_remaining = target_num_grasps
+
+        grasps = []
+        k = 1
+        while num_grasps_remaining > 0 and k <= max_iter:
+            # SAMPLING: generate more than we need
+            num_grasps_generate = grasp_gen_mult * num_grasps_remaining
+            #这里调用它的子类的具体重定义的sample_grasps函数
+            #返回的new_grasps的形式是[(pose1,score1),(pose2,score2),...]
+            new_grasps = self.sample_grasps(graspable, num_grasps_generate, vis, **kwargs)
+
+            # COVERAGE REJECTION: prune grasps by distance
+            #防止过多极为相似的grasp，降低相互之间的覆盖率
+            #根据夹爪姿态之间的距离来进行拒绝
+            pruned_grasps = []
+            for grasp in new_grasps:
+                min_dist = np.inf
+                for cur_grasp in grasps:
+                    dist = ParallelJawPtGrasp3D.distance(cur_grasp[0], grasp[0])
+                    if dist < min_dist:
+                        min_dist = dist
+                for cur_grasp in pruned_grasps:
+                    dist = ParallelJawPtGrasp3D.distance(cur_grasp[0], grasp[0])
+                    if dist < min_dist:
+                        min_dist = dist
+                #如果检查的grasp与现有抓取集合中任意一个grasp的距离都比较大
+                #就保存下来
+                if min_dist >= self.grasp_dist_thresh_:
+                    pruned_grasps.append(grasp)
+
+            # ANGLE EXPANSION sample grasp rotations around the axis
+            candidate_grasps = []
+            if sample_approach_angles:
+                for grasp in pruned_grasps:
+                    # construct a set of rotated grasps
+                    for i in range(self.num_grasp_rots):
+                        rotated_grasp = copy.copy(grasp)
+                        delta_theta = 0  # add by Hongzhuo Liang
+                        print("This function can not use yes, as delta_theta is not set. --Hongzhuo Liang")
+                        rotated_grasp[0].set_approach_angle(i * delta_theta)
+                        candidate_grasps.append(rotated_grasp)
+            else:
+                candidate_grasps = pruned_grasps
+
+            # add to the current grasp set
+            grasps += candidate_grasps
+            logger.info('%d/%d grasps found after iteration %d.',
+                        len(grasps), target_num_grasps, k)
+
+            grasp_gen_mult *= 2
+            num_grasps_remaining = target_num_grasps - len(grasps)
+            k += 1
+
+        # shuffle computed grasps
+        random.shuffle(grasps)
+        #如果检测出的抓取比要求的数量多
+        if len(grasps) > target_num_grasps:
+            logger.info('Truncating %d grasps to %d.',
+                        len(grasps), target_num_grasps)
+            #截断至要求的数量就好
+            grasps = grasps[:target_num_grasps]
+        logger.info('Found %d grasps.', len(grasps))
+        return grasps
+
+
 
     def show_points(self, point, color='lb', scale_factor=.0005):
         if color == 'b':
@@ -377,21 +475,20 @@ class GraspSampler:
         minor_pc = minor_pc.reshape(1, 3)
         minor_pc = minor_pc / np.linalg.norm(minor_pc)
 
-        #将三个列向量  水平拼接
+        #得到标准的旋转矩阵
         matrix = np.hstack([approach_normal.T, binormal.T, minor_pc.T])
-        #转置
+        #转置=求逆（酉矩阵）
         grasp_matrix = matrix.T  # same as cal the inverse
 
-        #这个graspable就是  allpoints（全部点）
-        #isinstance  判断，如果graspable的类型和dexnet.grasping.graspable_object.GraspableObject3D是相同的，那么就返回true
-        #
+        #判断points是不是点云
         if isinstance(graspable, dexnet.grasping.graspable_object.GraspableObject3D):
+            #不是的话
             points = graspable.sdf.surface_points(grid_basis=False)[0]
-        else:
+        else:#是的话
             points = graspable
         #获取所有的点相对于夹爪底部中心点的向量
         points = points - grasp_bottom_center.reshape(1, 3)
-        # points_g = points @ grasp_matrix
+        #points_g = points @ grasp_matrix
         tmp = np.dot(grasp_matrix, points.T)
         points_g = tmp.T
         #p_open 代表，检查闭合区域内部有没有点，不包含夹爪自身碰撞，只是看夹爪内部有没有点云
@@ -482,21 +579,21 @@ class GraspSampler:
         # self.show_points(all_points)
         # mlab.show()
 
-    def check_collide(self, grasp_bottom_center, approach_normal, binormal, minor_pc, graspable, hand_points):
+    def check_collide(self, grasp_bottom_center, approach_normal, binormal, minor_pc, graspable, hand_points,vis=False):
         """仅仅检查点云是否与夹爪碰撞，而不检查桌面
         """
         bottom_points = self.check_collision_square(grasp_bottom_center, approach_normal,
-                                                    binormal, minor_pc, graspable, hand_points, "p_bottom")
+                                                    binormal, minor_pc, graspable, hand_points, "p_bottom",vis)
         if bottom_points[0]:
             return True
 
         left_points = self.check_collision_square(grasp_bottom_center, approach_normal,
-                                                  binormal, minor_pc, graspable, hand_points, "p_left")
+                                                  binormal, minor_pc, graspable, hand_points, "p_left",vis)
         if left_points[0]:
             return True
 
         right_points = self.check_collision_square(grasp_bottom_center, approach_normal,
-                                                   binormal, minor_pc, graspable, hand_points, "p_right")
+                                                   binormal, minor_pc, graspable, hand_points, "p_right",vis)
         if right_points[0]:
             return True
         return False
@@ -801,7 +898,11 @@ class AntipodalGraspSampler(GraspSampler):
     def sample_grasps(self, graspable, num_grasps, vis=False, **kwargs):
         """在这里完成对点抓取的具体采样过程
         Returns a list of candidate grasps for graspable object.
-
+        先在表面上随机采样出一个接触点c1
+        然后根据表面计算出点c1位置出的表面法向量以及满足指定摩擦力的一个摩擦锥
+        然后以c1为起点，做射线穿透物体，保证该射线是处于摩擦锥内部的（保证了点c1满足力闭合）
+        然后找到一个射线对物体另一边的交点c2，并计算法向量n2
+        之后计算c1c2连线是否分别处于c1&c2的摩擦锥内（力闭合判断）
         Parameters
         ----------
         graspable : :obj:`GraspableObject3D`
@@ -825,7 +926,7 @@ class AntipodalGraspSampler(GraspSampler):
 
         for k, x_surf in enumerate(shuffled_surface_points):
             # print("k:", k, "len(grasps):", len(grasps))
-            start_time = time.clock()
+            #start_time = time.clock()
 
             # perturb grasp for num samples
             for i in range(self.num_samples):
@@ -835,15 +936,16 @@ class AntipodalGraspSampler(GraspSampler):
                 # compute friction cone faces
                 c1 = Contact3D(graspable, x1, in_direction=None)
                 _, tx1, ty1 = c1.tangents()
+                #返回接触点c1处的摩擦锥以及表面法相
                 cone_succeeded, cone1, n1 = c1.friction_cone(self.num_cone_faces, self.friction_coef)
                 if not cone_succeeded:
                     continue
-                cone_time = time.clock()
+                #cone_time = time.clock()
 
-                # sample grasp axes from friction cone
+                # sample grasp axes from friction cone 对点c1处的
                 v_samples = self.sample_from_cone(n1, tx1, ty1, num_samples=1)
-                sample_time = time.clock()
-
+                #sample_time = time.clock()
+                #画图显示debug
                 for v in v_samples:
                     if vis:
                         x1_grid = graspable.sdf.transform_pt_obj_to_grid(x1)
@@ -860,7 +962,7 @@ class AntipodalGraspSampler(GraspSampler):
                     if random.random() > 0.5:
                         v = -v
 
-                    # start searching for contacts  在这里,是根据
+                    #利用射线v和x1点计算出两个接触点c1  c2坐标以及一个“空”抓取
                     #此时这里的grasp并不是一个完全定义的抓取，此时他们把旋转angle使用了0来代替
                     grasp, c1, c2 = ParallelJawPtGrasp3D.grasp_from_contact_and_axis_on_grid(
                         graspable, x1, v, self.gripper.max_width,
@@ -895,7 +997,7 @@ class AntipodalGraspSampler(GraspSampler):
                         continue
 
                     v_true = grasp.axis
-                    # compute friction cone for contact 2   计算接触点c2的摩擦锥
+                    # compute friction cone for contact 2   计算接触点c2的摩擦锥和表面法向量
                     cone_succeeded, cone2, n2 = c2.friction_cone(self.num_cone_faces, self.friction_coef)
                     if not cone_succeeded:
                         continue
@@ -910,10 +1012,11 @@ class AntipodalGraspSampler(GraspSampler):
                         time.sleep(0.5)
                         plt.close()  # lol
 
-                    # check friction cone  检查所生成的抓取是否是力闭合的
-                    # 即，检测接触点c1  c2是不是在摩擦锥内部
-                    if PointGraspMetrics3D.force_closure(c1, c2, self.friction_coef):
-                        grasps.append(grasp)
+                    # 根据给定的摩擦力，检查所生成的抓取是否力闭合
+                    # 力闭合将会返回一个分数
+                    score = PointGraspMetrics3D.force_closure_score(c1, c2, self.friction_coef)
+                    if score:
+                        grasps.append((grasp,score))
 
         # randomly sample max num grasps from total list
         random.shuffle(grasps)

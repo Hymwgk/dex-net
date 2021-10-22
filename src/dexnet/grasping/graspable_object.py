@@ -52,7 +52,7 @@ class GraspableObject:
         object identifier, usually given from the database
     model_name : :obj:`str`
         name of the object mesh as a .obj file, for use in collision checking
-    mass : float
+    mass : float 物体的质量
         mass of the object
     convex_pieces : :obj:`list` of :obj:`Mesh3D`
         convex decomposition of the object geom for collision checking

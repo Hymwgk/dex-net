@@ -224,7 +224,7 @@ class Contact3D(Contact):
 
     def friction_cone(self, num_cone_faces=8, friction_coef=0.5):
         """ Computes the friction cone and normal for a contact point.
-
+                结合给定的摩擦系数，为某个点计算它的摩擦锥以及表面法向量
         Parameters
         ----------
         num_cone_faces : int
@@ -239,7 +239,7 @@ class Contact3D(Contact):
         cone_support : :obj:`numpy.ndarray`
             array where each column is a vector on the boundary of the cone
         normal : normalized 3x1 :obj:`numpy.ndarray`
-            outward facing surface normal
+            outward facing surface normal  法向量朝向外部
         """
         if self.friction_cone_ is not None and self.normal_ is not None:
             return True, self.friction_cone_, self.normal_

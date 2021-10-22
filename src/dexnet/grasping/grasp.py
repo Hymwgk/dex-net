@@ -239,15 +239,17 @@ class ParallelJawPtGrasp3D(PointGrasp):
             raise ValueError('Illegal grasp axis. Must be norm one')
         #首先创建一个1行10列的行向量
         configuration = np.zeros(10)
-        #前3个数字是，抓取的中心
+        #前3个数字是，夹爪中心点坐标，表示夹爪的位置
         configuration[0:3] = center
         #4~6是抓取的闭合轴（两边夹爪相互靠近的轴）
         configuration[3:6] = axis
-        #
+        #猜测是计算出的夹爪张开宽度，每搞明白
         configuration[6] = width
         #绕轴旋转的角度
         configuration[7] = angle
+        #没搞明白
         configuration[8] = jaw_width
+        #该型号夹爪最小的闭合宽度
         configuration[9] = min_width
         return configuration
 
@@ -881,6 +883,7 @@ class ParallelJawPtGrasp3D(PointGrasp):
                                             min_grasp_width_world=0, vis=False, backup=0.5):
         """
         Creates a grasp from a single contact point in grid coordinates and direction in grid coordinates.
+        构建一个grasp框架
         
         Parameters
         ----------

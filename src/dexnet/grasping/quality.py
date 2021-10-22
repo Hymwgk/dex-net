@@ -260,25 +260,77 @@ class PointGraspMetrics3D:
         """
         if c1.point is None or c2.point is None or c1.normal is None or c2.normal is None:
             return 0
+        #两个接触点的坐标
         p1, p2 = c1.point, c2.point
+        #两个接触点的表面法向量
         n1, n2 = -c1.normal, -c2.normal  # inward facing normals
+
 
         if (p1 == p2).all():  # same point
             return 0
-
+        
         for normal, contact, other_contact in [(n1, p1, p2), (n2, p2, p1)]:
+            #两接触点向量
             diff = other_contact - contact
+            #
             normal_proj = normal.dot(diff) / np.linalg.norm(normal)
             if use_abs_value:
                 normal_proj = abs(normal.dot(diff)) / np.linalg.norm(normal)
 
             if normal_proj < 0:
                 return 0  # wrong side
+            #alpha是两点之间的射线与接触点法向量之间的夹角
             alpha = np.arccos(normal_proj / np.linalg.norm(diff))
             if alpha > np.arctan(friction_coef):
                 return 0  # outside of friction cone
         return 1
 
+    @staticmethod
+    def force_closure_score(c1, c2, friction_coef, use_abs_value=True):
+        """" Checks force closure using the antipodality trick.
+        检查是否是力闭合的，是的话返回分数
+        Parameters
+        ----------
+        c1 : :obj:`Contact3D`
+            first contact point
+        c2 : :obj:`Contact3D`
+            second contact point
+        friction_coef : float
+            coefficient of friction at the contact point
+        use_abs_value : bool
+            whether or not to use directoinality of the surface normal (useful when mesh is not oriented)
+
+        Returns
+        -------
+        int : 1 if in force closure, 0 otherwise
+        """
+        if c1.point is None or c2.point is None or c1.normal is None or c2.normal is None:
+            return 0
+        #两个接触点的坐标
+        p1, p2 = c1.point, c2.point
+        #两个接触点的表面法向量
+        n1, n2 = -c1.normal, -c2.normal  # inward facing normals
+
+
+        if (p1 == p2).all():  # same point
+            return 0
+        
+        cos_alpha=[0,0]
+        for index,item in enumerate([(n1, p1, p2), (n2, p2, p1)]):
+            diff = item[2] - item[1] 
+            normal_proj = item[0].dot(diff) / np.linalg.norm(item[0])
+            if use_abs_value:
+                normal_proj = abs(item[0].dot(diff)) / np.linalg.norm(item[0])
+
+            if normal_proj < 0:
+                return 0  # wrong side
+            #alpha是两点之间的射线与接触点法向量之间的夹角
+            alpha = np.arccos(normal_proj / np.linalg.norm(diff))
+            if alpha > np.arctan(friction_coef):
+                return 0  # outside of friction cone
+            cos_alpha[index]=normal_proj / np.linalg.norm(diff)
+        return cos_alpha[0]*cos_alpha[1]  #分数
+        
     @staticmethod
     def force_closure_qp(forces, torques, normals, soft_fingers=False,
                          wrench_norm_thresh=1e-3, wrench_regularizer=1e-10,

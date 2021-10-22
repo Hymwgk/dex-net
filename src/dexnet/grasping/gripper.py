@@ -48,13 +48,16 @@ class RobotGripper(object):
     name : :obj:`str`
         name of gripper
     mesh : :obj:`Mesh3D`
-        3D triangular mesh specifying the geometry of the gripper
+        3D triangular mesh specifying the geometry of the gripper  夹爪的mesh模型
     params : :obj:`dict`
-        set of parameters for the gripper, at minimum (finger_radius and grasp_width)
+        set of parameters for the gripper, at minimum (finger_radius and grasp_width)  指定夹爪的参数
     T_mesh_gripper : :obj:`RigidTransform`
-        transform from mesh frame to gripper frame (for rendering)
+        transform from mesh frame to gripper frame (for rendering)  
+        从特定夹爪的mesh坐标系到特定夹爪坐标系的变换，就是为了确定要将特定夹爪坐标系固定在夹爪模型的哪个位置（只是用于渲染显示）
+        注意：不同的夹爪型号具有不同类型的特定夹爪坐标系，它们每个轴的含义可能是不同的
     T_grasp_gripper : :obj:`RigidTransform`
         transform from gripper frame to the grasp canonical frame (y-axis = grasp axis, x-axis = palm axis)
+        从特定夹爪的坐标系到规范抓取坐标系的变换
     """
 
     def __init__(self, name, mesh, mesh_filename, params, T_mesh_gripper, T_grasp_gripper):
@@ -123,7 +126,8 @@ class RobotGripper(object):
         
         f = open(os.path.join(os.path.join(gripper_dir, gripper_name, GRIPPER_PARAMS_FILENAME)), 'r')
         params = json.load(f)
-
+        #获取gripper to mesh  的变换（gripper坐标系在mesh坐标系中的表示）
         T_mesh_gripper = RigidTransform.load(os.path.join(gripper_dir, gripper_name, T_MESH_GRIPPER_FILENAME)) 
+        #获取gripper to grasp  的变换（gripper坐标系在抓取规范坐标系中的表示）
         T_grasp_gripper = RigidTransform.load(os.path.join(gripper_dir, gripper_name, T_GRASP_GRIPPER_FILENAME)) 
         return RobotGripper(gripper_name, mesh, mesh_filename, params, T_mesh_gripper, T_grasp_gripper)
