@@ -46,7 +46,7 @@ class Contact:
     __metaclass__ = ABCMeta
 
 class Contact3D(Contact):
-    """ 3D contact points.
+    """ 3D contact points.构造接触点对象
 
     Attributes
     ----------
@@ -119,6 +119,7 @@ class Contact3D(Contact):
         The direction vector defaults to the *inward-facing* normal vector at
         this contact.
         The direction and tangent vectors for a right handed coordinate frame.
+        计算某接触点位置处的Darboux frame
 
         Parameters
         ----------
@@ -163,24 +164,28 @@ class Contact3D(Contact):
         z_hat = np.cross(x, y)
         if z_hat.dot(direction) < 0:
             y = -y
+
         v = x
         w = y
 
         # redefine tangent x axis to automatically align with the object x axis
+        #重新定义切线x轴，使得它与物体的x轴相配准
         if align_axes:
             max_ip = 0
             max_theta = 0
-            target = np.array([1, 0, 0])
+            target = np.array([1, 0, 0])#目标是物体的x轴
             theta = 0
-            d_theta = 2 * np.pi / float(max_samples)
+            d_theta = 2 * np.pi / float(max_samples)#将2pi分解为1000份
             for i in range(max_samples):
                 v = np.cos(theta) * x + np.sin(theta) * y
-                if v.dot(target) > max_ip:
-                    max_ip = v.dot(target)
-                    max_theta = theta
+                if v.dot(target) > max_ip: #v与世界x轴夹角小于上次最小夹角
+                    max_ip = v.dot(target)#更新最小夹角
+                    max_theta = theta#更新转角值
                 theta = theta + d_theta
-
+            
+            #新x轴 与 世界x轴配准
             v = np.cos(max_theta) * x + np.sin(max_theta) * y
+            #叉乘出新的y轴
             w = np.cross(direction.ravel(), v)
         return np.squeeze(direction), v, w
 
@@ -253,7 +258,7 @@ class Contact3D(Contact):
 
         # check whether contact would slip, which is whether or not the tangent force is always
         # greater than the frictional force
-        if self.in_direction_ is not None:
+        if self.in_direction_ is not None:#
             in_direction_norm = self.in_direction_ / np.linalg.norm(self.in_direction_)
             normal_force_mag = self.normal_force_magnitude()
             tan_force_x = np.dot(in_direction_norm, t1)

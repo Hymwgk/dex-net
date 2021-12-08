@@ -136,9 +136,9 @@ class GraspableObject3D(GraspableObject):
         """
         return x - self.mesh.center_of_mass
 
-    def rescale(self, scale):
+    def rescale(self, scale):#
         """ Rescales uniformly by a given factor.
-
+        按给定比例将物体进行放大缩小
         Parameters
         ----------
         scale : float

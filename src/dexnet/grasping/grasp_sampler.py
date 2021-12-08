@@ -24,7 +24,8 @@ logger.setLevel(logging.INFO)
 
 USE_OPENRAVE = True
 try:
-    import openravepy as rave
+    #import openravepy as rave
+    pass
 except ImportError:
     logger.warning('Failed to import OpenRAVE')
     USE_OPENRAVE = False
@@ -240,7 +241,11 @@ class GraspSampler:
             num_grasps_remaining = target_num_grasps - len(grasps)
             k += 1
 
+
+
+
         # shuffle computed grasps
+
         random.shuffle(grasps)
         #如果检测出的抓取比要求的数量多
         if len(grasps) > target_num_grasps:
@@ -248,6 +253,8 @@ class GraspSampler:
                         len(grasps), target_num_grasps)
             #截断至要求的数量就好
             grasps = grasps[:target_num_grasps]
+        
+
         logger.info('Found %d grasps.', len(grasps))
         return grasps
 
@@ -333,6 +340,7 @@ class GraspSampler:
             k += 1
 
         # shuffle computed grasps
+        '''暂时不截断全部保存
         random.shuffle(grasps)
         #如果检测出的抓取比要求的数量多
         if len(grasps) > target_num_grasps:
@@ -340,6 +348,7 @@ class GraspSampler:
                         len(grasps), target_num_grasps)
             #截断至要求的数量就好
             grasps = grasps[:target_num_grasps]
+        '''
         logger.info('Found %d grasps.', len(grasps))
         return grasps
 
@@ -441,6 +450,47 @@ class GraspSampler:
         p = np.vstack([np.array([0, 0, 0]), p1, p2, p3, p4, p5, p6, p7, p8, p9, p10,
                        p11, p12, p13, p14, p15, p16, p17, p18, p19, p20])
         return p
+
+    def get_hand_points_extend(self, grasp_bottom_center, approach_normal, binormal):
+        hh = self.gripper.hand_height+0.01
+        fw = self.gripper.finger_width
+        hod = self.gripper.hand_outer_diameter+0.02
+        hd = self.gripper.hand_depth+0.01
+        #open_w是夹爪内部的宽度
+        open_w = hod - fw * 2
+        #计算minor_pc，并单位化
+        minor_pc = np.cross(approach_normal, binormal)
+        minor_pc = minor_pc / np.linalg.norm(minor_pc)
+
+        p5_p6 = minor_pc * hh * 0.5 + grasp_bottom_center
+        p7_p8 = -minor_pc * hh * 0.5 + grasp_bottom_center
+        p5 = -binormal * open_w * 0.5 + p5_p6
+        p6 = binormal * open_w * 0.5 + p5_p6
+        p7 = binormal * open_w * 0.5 + p7_p8
+        p8 = -binormal * open_w * 0.5 + p7_p8
+        p1 = approach_normal * hd + p5
+        p2 = approach_normal * hd + p6
+        p3 = approach_normal * hd + p7
+        p4 = approach_normal * hd + p8
+
+        p9 = -binormal * fw + p1
+        p10 = -binormal * fw + p4
+        p11 = -binormal * fw + p5
+        p12 = -binormal * fw + p8
+        p13 = binormal * fw + p2
+        p14 = binormal * fw + p3
+        p15 = binormal * fw + p6
+        p16 = binormal * fw + p7
+
+        p17 = -approach_normal * hh + p11
+        p18 = -approach_normal * hh + p15
+        p19 = -approach_normal * hh + p16
+        p20 = -approach_normal * hh + p12
+        p = np.vstack([np.array([0, 0, 0]), p1, p2, p3, p4, p5, p6, p7, p8, p9, p10,
+                       p11, p12, p13, p14, p15, p16, p17, p18, p19, p20])
+        return p
+
+
 
     def show_grasp_3d(self, hand_points, color=(0.003, 0.50196, 0.50196)):
         # for i in range(1, 21):
@@ -856,7 +906,7 @@ class AntipodalGraspSampler(GraspSampler):
        """
         v_samples = []
         for i in range(num_samples):
-            theta = 2 * np.pi * np.random.rand()
+            theta = 2 * np.pi * np.random.rand()#随机选择一个角度
             r = self.friction_coef * np.random.rand()
             v = n + r * np.cos(theta) * tx + r * np.sin(theta) * ty
             v = -v / np.linalg.norm(v)
@@ -895,14 +945,49 @@ class AntipodalGraspSampler(GraspSampler):
         x_samp = x + (scale / 2.0) * (np.random.rand(3) - 0.5)
         return x_samp
 
+
+    def farthest_point_sample(self,xyz,npoint):
+        """
+        Input:
+            xyz: pointcloud data, [N, 3]
+            npoint: number of samples
+        Return:
+            centroids: sampled pointcloud index, [B, npoint]
+        """
+        N, C = xyz.shape
+        centroids = np.zeros(npoint,dtype=np.int) #初始化一个矩阵
+        distance = np.ones(N)* 1e10
+        farthest = np.random.randint(0, N)#随机选初始点
+
+        for i in range(npoint):
+            # 更新第i个最远点
+            centroids[i] = farthest
+            # 取出这个最远点的xyz坐标
+            centroid = xyz[farthest, :].reshape(1, 3)
+            # 计算点集中的所有点到这个最远点的欧式距离
+            dist = np.sum((xyz - centroid) ** 2, -1)
+            # 更新distances，记录样本中每个点距离所有已出现的采样点的最小距离
+            mask = dist < distance
+            distance[mask] = dist[mask] #[N,3]
+            # 从更新后的distances矩阵中找出距离最远的点，作为最远点用于下一轮迭代
+            farthest = np.argmax(distance)
+        
+        return xyz[centroids]
+
+
     def sample_grasps(self, graspable, num_grasps, vis=False, **kwargs):
-        """在这里完成对点抓取的具体采样过程
+        """对点采样器
         Returns a list of candidate grasps for graspable object.
         先在表面上随机采样出一个接触点c1
         然后根据表面计算出点c1位置出的表面法向量以及满足指定摩擦力的一个摩擦锥
         然后以c1为起点，做射线穿透物体，保证该射线是处于摩擦锥内部的（保证了点c1满足力闭合）
         然后找到一个射线对物体另一边的交点c2，并计算法向量n2
         之后计算c1c2连线是否分别处于c1&c2的摩擦锥内（力闭合判断）
+        
+        单次执行采样，最多返回数量为：
+        sample_points_num*self.num_samples*num_samples
+        优先修改sample_points_num、num_samples
+
         Parameters
         ----------
         graspable : :obj:`GraspableObject3D`
@@ -919,9 +1004,15 @@ class AntipodalGraspSampler(GraspSampler):
         """
         # get surface points
         grasps = []
+        #获取模型点坐标
         surface_points, _ = graspable.sdf.surface_points(grid_basis=False)
+        #随机打乱
         np.random.shuffle(surface_points)
-        shuffled_surface_points = surface_points[:min(self.max_num_surface_points_, len(surface_points))]
+        #截取指定数量的模型点,默认只会使用100个场景点
+        #shuffled_surface_points = surface_points[:min(self.max_num_surface_points_, len(surface_points))]
+        sample_points_num = min(self.max_num_surface_points_, len(surface_points))
+        shuffled_surface_points = self.farthest_point_sample(surface_points,sample_points_num)
+        #print(len(surface_points))
         logger.info('Num surface: %d' % (len(surface_points)))
 
         for k, x_surf in enumerate(shuffled_surface_points):
@@ -929,12 +1020,14 @@ class AntipodalGraspSampler(GraspSampler):
             #start_time = time.clock()
 
             # perturb grasp for num samples
-            for i in range(self.num_samples):
+            for i in range(self.num_samples):#self.num_samples默认是2
                 # perturb contact (TODO: sample in tangent plane to surface)
+                #对选出的接触点坐标添加随机扰动
                 x1 = self.perturb_point(x_surf, graspable.sdf.resolution)
 
-                # compute friction cone faces
-                c1 = Contact3D(graspable, x1, in_direction=None)
+                # compute friction cone faces   
+                c1 = Contact3D(graspable, x1, in_direction=None)#接触点对象
+                #计算在接触点位置的第一第二切向量
                 _, tx1, ty1 = c1.tangents()
                 #返回接触点c1处的摩擦锥以及表面法相
                 cone_succeeded, cone1, n1 = c1.friction_cone(self.num_cone_faces, self.friction_coef)
@@ -942,11 +1035,14 @@ class AntipodalGraspSampler(GraspSampler):
                     continue
                 #cone_time = time.clock()
 
-                # sample grasp axes from friction cone 对点c1处的
-                v_samples = self.sample_from_cone(n1, tx1, ty1, num_samples=1)
+                # sample grasp axes from friction cone 在C1点摩擦锥内部采样得到指定数量的射线方向
+                #num_samples=1是不是太小了？每个采样点只会采样出一个方向
+                v_samples = self.sample_from_cone(n1, tx1, ty1, num_samples=3)
                 #sample_time = time.clock()
-                #画图显示debug
+
+                #对采样到的抓取
                 for v in v_samples:
+                
                     if vis:
                         x1_grid = graspable.sdf.transform_pt_obj_to_grid(x1)
                         cone1_grid = graspable.sdf.transform_pt_obj_to_grid(cone1, direction=True)
@@ -991,7 +1087,7 @@ class AntipodalGraspSampler(GraspSampler):
                     c1 = c[0]
                     c2 = c[1]
 
-                    # make sure grasp is wide enough
+                    # make sure grasp is wide enough 保证抓取的宽度足够宽，对于薄壁物体的抓取采样有帮助
                     x2 = c2.point
                     if np.linalg.norm(x1 - x2) < self.min_contact_dist:
                         continue

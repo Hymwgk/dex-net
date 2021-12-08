@@ -628,7 +628,7 @@ class ParallelJawPtGrasp3D(PointGrasp):
         Parameters
         ----------
         line_of_action : :obj:`list` of 3x1 :obj:`numpy.ndarray`
-            the points visited as the fingers close (grid coords)
+            the points visited as the fingers close (grid coords)手指闭合时访问的点（网格线）
         obj : :obj:`GraspableObject3D`
             to check contacts on
         vis : bool
@@ -878,9 +878,14 @@ class ParallelJawPtGrasp3D(PointGrasp):
                        camera_intr=camera_intr)
 
     @staticmethod
-    def grasp_from_contact_and_axis_on_grid(obj, grasp_c1_world, grasp_axis_world, grasp_width_world, grasp_angle=0,
+    def grasp_from_contact_and_axis_on_grid(obj, 
+                                            grasp_c1_world,#接触点1
+                                            grasp_axis_world,#射线
+                                            grasp_width_world, #夹爪最大抓取尺寸
+                                            grasp_angle=0, 
                                             jaw_width_world=0,
-                                            min_grasp_width_world=0, vis=False, backup=0.5):
+                                            min_grasp_width_world=0,#夹爪最小抓取尺寸
+                                            vis=False, backup=0.5):
         """
         Creates a grasp from a single contact point in grid coordinates and direction in grid coordinates.
         构建一个grasp框架
@@ -912,22 +917,28 @@ class ParallelJawPtGrasp3D(PointGrasp):
             second contact point on the object
         """
         # transform to grid basis
-        grasp_axis_world = grasp_axis_world / np.linalg.norm(grasp_axis_world)
+        grasp_axis_world = grasp_axis_world / np.linalg.norm(grasp_axis_world)#射线单位化
+
         grasp_axis_grid = obj.sdf.transform_pt_obj_to_grid(grasp_axis_world, direction=True)
+
         grasp_width_grid = obj.sdf.transform_pt_obj_to_grid(grasp_width_world)
+
         min_grasp_width_grid = obj.sdf.transform_pt_obj_to_grid(min_grasp_width_world)
+
         grasp_c1_grid = obj.sdf.transform_pt_obj_to_grid(
             grasp_c1_world) - backup * grasp_axis_grid  # subtract to find true point
+
         num_samples = int(2 * grasp_width_grid)  # at least 2 samples per grid
         g2 = grasp_c1_grid + (grasp_width_grid - backup) * grasp_axis_grid
 
-        # get line of action
+        # get line of action生成一系列的射线？
         line_of_action1 = ParallelJawPtGrasp3D.create_line_of_action(grasp_c1_grid, grasp_axis_grid, grasp_width_grid,
                                                                      obj, num_samples,
                                                                      min_width=min_grasp_width_grid, convert_grid=False)
         line_of_action2 = ParallelJawPtGrasp3D.create_line_of_action(g2, -grasp_axis_grid, 2 * grasp_width_grid, obj,
                                                                      num_samples,
                                                                      min_width=0, convert_grid=False)
+
         if vis:
             obj.sdf.scatter()
             ax = plt.gca(projection='3d')
@@ -944,12 +955,15 @@ class ParallelJawPtGrasp3D(PointGrasp):
             ax.set_ylim3d(0, obj.sdf.dims_[1])
             ax.set_zlim3d(0, obj.sdf.dims_[2])
             plt.draw()
+
+        #如果没找到接触点；或者找到的两个接触点间距小于夹爪最小闭合间距，就放弃
         if not contact1_found or not contact2_found or np.linalg.norm(c1.point - c2.point) <= min_grasp_width_world:
             logging.debug('No contacts found for grasp')
             return None, None, None
 
         # create grasp   c1与c2的中点坐标，
-        # 注意这个grasp_center可不是夹爪的bottom_center，而是夹爪接触点的中心
+        # grasp_center 位于接触点的中心点位置
+        #这一点不太好，接触点总是位于中心位置
         grasp_center = ParallelJawPtGrasp3D.center_from_endpoints(c1.point, c2.point)
         #这里的轴，是两边夹爪相互靠近的方向，就是接触点c1与c2构成的向量方向
         grasp_axis = ParallelJawPtGrasp3D.axis_from_endpoints(c1.point, c2.point)
@@ -957,6 +971,7 @@ class ParallelJawPtGrasp3D(PointGrasp):
         configuration = ParallelJawPtGrasp3D.configuration_from_params(grasp_center, grasp_axis, grasp_width_world,
                                                                        grasp_angle, jaw_width_world)
         return ParallelJawPtGrasp3D(configuration), c1, c2  # relative to object
+
 
     def surface_information(self, graspable, width=2e-2, num_steps=21, direction=None):
         """ Return the patch surface information at the contacts that this grasp makes on a graspable.
